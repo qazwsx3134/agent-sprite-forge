@@ -1,0 +1,40 @@
+{
+  "name": "agent-sprite-forge",
+  "version": "0.1.0",
+  "description": "Production-oriented 2D game asset workflows for sprites, layered maps, deterministic post-processing, and Cowart canvas handoff.",
+  "author": {
+    "name": "0x0funky",
+    "url": "https://github.com/0x0funky"
+  },
+  "homepage": "https://github.com/0x0funky/agent-sprite-forge",
+  "repository": "https://github.com/0x0funky/agent-sprite-forge",
+  "license": "MIT",
+  "keywords": [
+    "2d-game-assets",
+    "sprites",
+    "sprite-sheets",
+    "game-maps",
+    "cowart"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent Sprite Forge",
+    "shortDescription": "Generate game-ready 2D maps and sprites, including Cowart handoff.",
+    "longDescription": "Agent Sprite Forge plans production-oriented map and sprite pipelines, generates raw art with the host image model, runs deterministic cleanup and QC, exports engine-ready bundles, and can return selected previews and sheets to a Cowart canvas.",
+    "developerName": "0x0funky",
+    "category": "Developer Tools",
+    "websiteURL": "https://github.com/0x0funky/agent-sprite-forge",
+    "capabilities": [
+      "2D sprite generation",
+      "Layered map generation",
+      "Deterministic asset post-processing",
+      "Engine-ready export",
+      "Cowart canvas handoff"
+    ],
+    "defaultPrompt": [
+      "Create a game-ready 2D sprite sheet and return it to Cowart.",
+      "Build a layered 2D map bundle and place its preview on Cowart.",
+      "Generate and QC a transparent 2D game asset bundle."
+    ]
+  }
+}

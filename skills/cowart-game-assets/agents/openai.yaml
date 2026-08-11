@@ -1,0 +1,13 @@
+interface:
+  display_name: "Cowart Game Assets"
+  short_description: "Generate production-ready game maps and sprites on Cowart"
+  default_prompt: "Use $agent-sprite-forge:cowart-game-assets to create a production-ready 2D game asset in the selected Cowart AI image holder."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "cowart_mcp"
+      description: "Cowart canvas selection, widget, storage, and image insertion tools"
+
+policy:
+  allow_implicit_invocation: true

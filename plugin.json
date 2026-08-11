@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "agent-sprite-forge",
+  "version": "0.1.0",
+  "description": "Production-oriented 2D game asset workflows for sprites, layered maps, deterministic post-processing, and Cowart canvas handoff.",
+  "author": {
+    "name": "0x0funky",
+    "url": "https://github.com/0x0funky"
+  },
+  "homepage": "https://github.com/0x0funky/agent-sprite-forge",
+  "repository": "https://github.com/0x0funky/agent-sprite-forge",
+  "license": "MIT",
+  "keywords": [
+    "2d-game-assets",
+    "sprites",
+    "sprite-sheets",
+    "game-maps",
+    "cowart"
+  ]
+}
