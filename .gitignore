@@ -9,3 +9,4 @@ outputs/
 !.env.example
 .forge/
 AGENTS.md
+.venv
