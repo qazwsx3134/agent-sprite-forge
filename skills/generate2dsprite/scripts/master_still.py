@@ -20,7 +20,10 @@
 
 Every command writes a new --output-dir (staged beside it, never replacing
 anything) and prints one ASCII JSON line. Errors print 'error: ...' and exit 1;
-usage errors exit 2. The media CLI is found beside this skill
+usage errors exit 2; generate and edit exit 4 when every take failed (the run
+folder is still published for diagnosis). generate and edit take
+--progress-file (or FORGE_PROGRESS_FILE): one JSON line per stage for a host.
+The media CLI is found beside this skill
 (../generate2dmedia/scripts/route_media.py); --media-cli overrides it, and
 FORGE_ROUTE_MEDIA_FAKE=<script.py> substitutes a fake for tests (recorded in
 run.json). Details: references/master-still.md.
@@ -71,7 +74,7 @@ DEFAULT_TIMEOUT_S = 1800.0
 ORDINALS = ("FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH", "SIXTH", "SEVENTH", "EIGHTH")
 
 FACINGS = ("left", "right", "front", "back", "none")
-FINISHES = ("hd", "pixel")
+FINISHES = ("hd", "pixel", "hibit")
 PRONOUNS = {"he": "his", "she": "her", "it": "its", "they": "their"}
 MATTES = ("soft", "dominance", "hard")
 KEY_NAMES = {"#FF00FF": "magenta", "#00FF00": "green", "#0000FF": "blue"}
@@ -123,6 +126,17 @@ class Style:
 
 
 STYLES = {
+    # hibit: the image model paints clean flat art; the outline and the pixel grid come from the finish
+    # (forge_hibit: k-means palette, majority downsample, an outline coloured from the image).
+    "hibit": Style(
+        "clean flat cel-shaded 2D game art{for_genre}, painted for pixel conversion: lineless shapes with NO outline "
+        "and no line art, every material in at most 3 flat tones (highlight, base, shadow), cool purple-leaning shadows "
+        "and warm highlights, large crisp angular light and shadow shapes, a bold readable silhouette, no gradients, "
+        "no airbrush, no texture noise, no dithering, no pixel grid",
+        "clean flat lineless cel-shaded style",
+        "lineless flat shapes, at most 3 flat tones per material, cool shadows and warm highlights, crisp angular "
+        "shading shapes, no outlines, no gradients",
+        "flat cel-shaded"),
     "pixel": Style(
         "premium 16-bit pixel art (SNES era){for_genre}, crisp visible chunky pixels, limited palette, strong dark "
         "outline, 3-tone cel shading, no smooth gradients, no blur",
@@ -379,7 +393,7 @@ def normalise_spec(raw: dict[str, Any], *, attach: bool) -> tuple[dict[str, Any]
         raise ValueError(f"class must be one of {', '.join(CLASSES)}; got {klass!r}.")
     finish = str(raw.get("finish") or "hd").strip().lower()
     if finish not in FINISHES:
-        raise ValueError(f"finish must be hd or pixel; got {finish!r}.")
+        raise ValueError(f"finish must be hd, pixel or hibit; got {finish!r}.")
     facing = str(raw.get("facing") or ("none" if klass == "prop" else "right")).strip().lower()
     if facing not in FACINGS:
         raise ValueError(f"facing must be one of {', '.join(FACINGS)}; got {facing!r}.")
@@ -868,7 +882,7 @@ def redact(text: str) -> str:
 
 def _run_child(argv: list[str], timeout: float | None, label: str) -> tuple[int, str, list[str], bool]:
     """Run the media CLI: stdout captured line by line, stderr echoed live (prefixed, redacted) and kept."""
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    env = {**forge_core.child_env_without_progress(), "PYTHONIOENCODING": "utf-8"}
     process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                env=env)
     out_lines: list[str] = []
@@ -984,15 +998,21 @@ def call_media(media: MediaCli, *, prompt_file: Path, references: Sequence[Path]
     return record
 
 
+def _no_progress(*_args: Any, **_kwargs: Any) -> None:
+    """The progress reporter of library calls that pass none (forge_core.Progress has the same signature)."""
+
+
 def run_takes(stage: Path, count: int, *, prompt_file: Path, references: Sequence[Path],
-              media: MediaCli) -> list[dict[str, Any]]:
+              media: MediaCli, progress: Any = _no_progress) -> list[dict[str, Any]]:
     takes_dir = stage / "takes"
     takes_dir.mkdir()
     records = []
     for take in range(1, count + 1):
+        progress("take", take - 1, count, f"take {take} of {count} through {media.path.name}")
         record = call_media(media, prompt_file=prompt_file, references=references,
                             out_dir=takes_dir / f"take-{take:02d}", take=take, stage=stage)
         records.append(record)
+        progress("take", take, count, f"take {take}: {record['status']}")
         if record["status"] == "no-route":
             break  # no route for this take means none for the next
     return records
@@ -1189,19 +1209,22 @@ def _generation(command: str, args: argparse.Namespace, spec: dict[str, Any], pr
         warnings.append(f"{MEDIA_FAKE_ENV} is set: the takes come from a fake media CLI (tests only), not a real "
                         "generation")
     output = Path(args.output_dir)
+    progress = getattr(args, "progress", None) or _no_progress
     status, fallback, takes = "ok", None, []
     with forge_core.staged_output(output) as stage:
+        progress("prompt", None, None, f"{command}: prompt.txt and spec.json")
         _write_prompt_and_spec(stage, spec, prompt)
         if edit is not None:
             edit = {**edit, "still": forge_core.file_ref(edit["still"], stage),
                     "extra": [{"role": role, **forge_core.file_ref(path, stage)} for path, role in edit["extra"]]}
         if media is not None:
             takes = run_takes(stage, args.takes, prompt_file=stage / "prompt.txt",
-                              references=[path for _, path in references], media=media)
+                              references=[path for _, path in references], media=media, progress=progress)
             status, fallback = takes_status(takes, args.takes)
         good = [record for record in takes if record["status"] == "ok"]
         contact = None
         if len(good) >= 2:
+            progress("contact", None, None, f"takes.png of {len(good)} takes")
             sheet = contact_sheet([(stage / record["artifact"]["path"], f"take {record['take']}") for record in good])
             forge_core.save_png(sheet, stage / "takes.png")
             contact = forge_core.file_ref(stage / "takes.png", stage)
@@ -1210,6 +1233,7 @@ def _generation(command: str, args: argparse.Namespace, spec: dict[str, Any], pr
         if contact:
             doc["contact"] = contact
         forge_core.write_json(stage / "run.json", doc)
+        progress("publish", None, None, f"run.json, status {status}")
     _emit(warnings)
     final = final_path(output)
     summary: dict[str, Any] = {
@@ -1227,10 +1251,11 @@ def _generation(command: str, args: argparse.Namespace, spec: dict[str, Any], pr
     if fallback:
         summary["fallback"] = fallback
     summary["warnings"] = len(warnings)
+    progress("done", None, None, f"{command} {status}")
     if status == "fail":
         errors = "; ".join(f"take {record['take']}: {record.get('error', record['status'])}" for record in takes)
         summary["error"] = f"every take failed ({errors})"
-        return summary, 1
+        return summary, forge_core.EXIT_PUBLISHED_FAIL
     return summary, NO_ROUTE_EXIT if status == "no-route" else 0
 
 
@@ -1502,7 +1527,7 @@ def add_spec_arguments(parser: argparse.ArgumentParser, *, with_spec_file: bool 
                                       "three-quarter)')")
     group.add_argument("--class", dest="klass", choices=sorted(CLASSES),
                        help="framing preset: hero, mob, boss or prop (default hero)")
-    group.add_argument("--finish", choices=FINISHES, help="hd (default) or pixel: sets the style line")
+    group.add_argument("--finish", choices=FINISHES, help="hd (default), pixel or hibit (flat lineless art for the hi-bit finish): sets the style line")
     group.add_argument("--key", type=key_arg, help="flat key colour: #RRGGBB, magenta, green or blue (default #FF00FF)")
     group.add_argument("--genre", help="the game, for the style line, e.g. 'a side-scrolling action game' "
                                        "(default: none)")
@@ -1538,6 +1563,9 @@ def add_media_arguments(parser: argparse.ArgumentParser) -> None:
                        help="extra argument for route_media.py, repeatable; write flags as --media-arg=--flag")
     group.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S,
                        help=f"seconds before one take is stopped (default {DEFAULT_TIMEOUT_S:g})")
+    group.add_argument("--progress-file",
+                       help=f"append one JSON line per stage (prompt, take N of M, contact, publish, done) to this "
+                            f"file for a host (default: ${forge_core.PROGRESS_ENV}, else none); stdout is unchanged")
 
 
 def add_pad_arguments(parser: argparse.ArgumentParser) -> None:
@@ -1653,20 +1681,27 @@ def _check_args(args: argparse.Namespace) -> None:
 def run(argv: Sequence[str] | None = None) -> tuple[dict[str, Any], int]:
     """Parse argv and run the command; returns (JSON summary, exit status). Raises on errors."""
     args = build_parser().parse_args(argv)
-    _check_args(args)
-    return args.func(args)
+    args.progress = forge_core.Progress(TOOL_NAME, args.progress_file) if hasattr(args, "progress_file") else None
+    try:
+        _check_args(args)
+        return args.func(args)
+    except BaseException as error:
+        if args.progress is not None:
+            args.progress("error", None, None, str(error) or type(error).__name__)
+        raise
 
 
 def _run(argv: Sequence[str] | None = None) -> int:
     summary, code = run(argv)
     print(json.dumps(summary, ensure_ascii=True))
-    if code == 1 and summary.get("error"):
+    if code == forge_core.EXIT_PUBLISHED_FAIL and summary.get("error"):
         print("error: " + _ascii(summary["error"]), file=sys.stderr)
     return code
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Usage errors exit 2; refused input exits 1 with 'error: ...'; no route exits 3 (forge_core.run_cli)."""
+    """Usage errors exit 2; refused input exits 1 with 'error: ...'; no route exits 3; a run published with
+    every take failed exits 4 (forge_core.EXIT_PUBLISHED_FAIL) with 'error: ...' (forge_core.run_cli)."""
     return forge_core.run_cli(_run, argv)
 
 
